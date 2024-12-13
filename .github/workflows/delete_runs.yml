@@ -1,0 +1,48 @@
+name: Delete Workflow Runs
+
+on:
+  workflow_dispatch: # Trigger manually
+
+permissions:
+  actions: write # Required to delete workflows and artifacts
+  contents: read # Minimum permissions for API calls
+
+jobs:
+  delete-runs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete workflow runs
+        env:
+          REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fetching workflow runs for $REPO"
+
+          # Get workflow runs
+          runs=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/actions/runs?per_page=100")
+
+          # Extract run IDs and loop through them
+          echo "$runs" | jq -r '.workflow_runs[].id' | while read -r run_id; do
+            echo "Deleting artifacts for run $run_id"
+
+            # Delete artifacts
+            artifacts=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$REPO/actions/runs/$run_id/artifacts")
+            
+            echo "$artifacts" | jq -r '.artifacts[].id' | while read -r artifact_id; do
+              curl -X DELETE -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$REPO/actions/artifacts/$artifact_id"
+              echo "Deleted artifact $artifact_id"
+            done
+
+            # Delete the workflow run
+            echo "Deleting workflow run $run_id"
+            curl -X DELETE -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$REPO/actions/runs/$run_id"
+            echo "Deleted workflow run $run_id"
+          done

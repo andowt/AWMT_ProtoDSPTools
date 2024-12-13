@@ -1,0 +1,50 @@
+name: Unit Test
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:  # Allows manual triggering of the workflow
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'  # You can change the version as needed
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+
+      - name: Install dependencies using Poetry
+        run: |
+          poetry install  --with dev
+
+      - name: Run pytest
+        run: |
+          poetry run pytest --maxfail=1 --disable-warnings -q > test-results.txt  # Run pytest using Poetry's virtualenv
+        continue-on-error: true  # Upload even if pytest fails
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results.txt
+
+      - name: Set test status
+        run: |
+          if [[ -f test-results.txt ]]; then
+            cat test-results.txt
+            if grep -q "FAILED" test-results.txt; then
+              echo "Test failed"
+              exit 1
+            fi
+          fi
+       

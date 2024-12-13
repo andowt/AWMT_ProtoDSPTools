@@ -1,0 +1,74 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Choose the version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check if on main branch
+        run: |
+          if [[ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]]; then
+            echo "This workflow can only run on the 'main' branch."
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set Git user identity (repository-scoped)
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions Bot"
+
+      - name: Check if 'release' branch exists
+        run: |
+          if git ls-remote --exit-code --heads origin release; then
+            echo "Release branch already exists on origin, deleting."
+            git push origin --delete release  # Delete the remote 'release' branch
+          fi
+
+      - name: Instal PIP requirements
+        run: |
+          pip install bump2version
+
+      - name: Bump version
+        run: |
+          version_type="${{ github.event.inputs.version }}"
+          echo "Bumping version by: $version_type"
+          bump2version $version_type
+          # Capture the bumped version from .bumpversion.cfg
+          bumped_version=$(grep -oP '(?<=current_version = ).*' .bumpversion.cfg)
+          echo "Bumped version is: $bumped_version"
+          echo "VERSION=$bumped_version" >> $GITHUB_ENV  # Set the version as an environment variable
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.PAT_PUSH_TOKEN }}  # Use 'token' instead of 'github_token'
+          base: main  # Target branch is main
+          branch: release  # Source branch is release
+          title: "Release - ${{ env.VERSION }}"  # Use the environment variable here
+          body: "This pull request merges the release branch into the main branch.\nThis will trigger the deploy workflow"
+          draft: false

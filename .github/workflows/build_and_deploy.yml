@@ -1,0 +1,123 @@
+name: Build & Deploy
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - closed
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'  # You can change the version as needed
+
+      - name: Get Version
+        id: get_version
+        run: |
+          # Capture the bumped version from .bumpversion.cfg
+          bumped_version=$(grep -oP '(?<=current_version = ).*' .bumpversion.cfg)
+          echo "Bumped version is: $bumped_version"
+          echo "version=$bumped_version" >> $GITHUB_OUTPUT
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          poetry install  --with dev
+
+      - name: Build the package and capture output
+        run: |
+          # Run poetry build and capture the output into a log file
+          poetry build > build_output.log 2>&1
+          build_exit_code=$?
+          echo "BUILD_EXIT_CODE=$build_exit_code" >> $GITHUB_ENV
+          echo "Poetry build completed. Log saved to build_output.log"
+        continue-on-error: true
+
+      - name: Store build log on fail
+        if: ${{ env.BUILD_EXIT_CODE != 0 }}  # Check if the build failed
+        uses: actions/upload-artifact@v4
+        with:
+          name: poetry-build-log
+          path: build_output.log  # Upload the log file only if the build failed
+      
+      - name: Store build output on pass
+        if: ${{ env.BUILD_EXIT_CODE == 0 }}  # Check if the build failed
+        uses: actions/upload-artifact@v4
+        with:
+          name: poetry-build-artifacts
+          path: dist/
+
+      - name: Force workflow failure on build failure
+        if: ${{ env.BUILD_EXIT_CODE != 0 }}  # Check if the build failed
+        run: |
+          echo "Build failed with exit code ${{ env.BUILD_EXIT_CODE }}. Exiting with error."
+          exit 1  # Force the workflow to fail
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && github.event.pull_request.head.ref == 'release' }}
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: poetry-build-artifacts
+          path: dist/
+      
+      - name: Install dependencies
+        run: |
+          pip install twine
+
+      - name: Generate Release Notes
+        run: |
+          git fetch --tags
+          # Get the last version tag in the format vX.Y.Z
+          LAST_TAG=$(git tag -l "v*" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+
+          if [ -z "$LAST_TAG" ]; then
+            # If no tag is found, use the full commit log
+            echo "No version tag found, using full commit log"
+            git log --pretty=format:'- %s' > release_notes.md
+          else
+            # If a tag is found, generate release notes from the tag
+            echo "Generating release notes from tag $LAST_TAG"
+            git log --pretty=format:'- %s' $LAST_TAG..HEAD > release_notes.md
+          fi
+
+      - name: Release to GitHub Releases
+        run: |
+          export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          VERSION="${{ needs.build.outputs.version }}"
+          if gh release view "v$VERSION" > /dev/null 2>&1; then
+            echo "Release v$VERSION already exists. Updating..."
+            gh release upload "v$VERSION" dist/* release_notes.md --clobber
+          else
+            echo "Creating new release v$VERSION..."
+            gh release create "v$VERSION" dist/* --notes "Build artifacts for version $VERSION" --title "v$VERSION"
+            gh release upload "v$VERSION" release_notes.md
+          fi
+
+      - name: Publish to PyPI
+        run: |
+          twine upload dist/* -u __token__ -p ${{ secrets.PYPI_API_TOKEN }}
