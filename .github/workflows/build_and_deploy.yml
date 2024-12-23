@@ -123,7 +123,7 @@ jobs:
         run: |
           git fetch --tags
           # Get the last version tag in the format vX.Y.Z
-          LAST_TAG=$(git tag -l "v*" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          LAST_TAG=$(git tag -l "v*" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 2 | head -n 1)
 
           if [ -z "$LAST_TAG" ]; then
             # If no tag is found, use the full commit log
@@ -133,6 +133,10 @@ jobs:
             # If a tag is found, generate release notes from the tag
             echo "Generating release notes from tag $LAST_TAG"
             LOG_OUTPUT=$(git log --pretty=format:'- %s' $LAST_TAG..HEAD | tee release_notes.md)
+            if [ -s release_notes.md ]; then
+              echo "Previous version tag found, using full commit log"
+              LOG_OUTPUT=$(git log --pretty=format:'- %s' | tee release_notes.md)
+            fi
           fi
 
           echo "$LOG_OUTPUT"
