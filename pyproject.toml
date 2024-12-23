@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "AWMT_BasicPythonPackage"
+name = "awmt-proto-dsp-tools"
 version = "0.1.0"
-description = "A simple template package"
+description = "Prototype DSP Testing Tools from Andy West Music Tech"
 authors = ["Andy West"]
 readme = "README.md"
 license = "MIT"
@@ -12,7 +12,11 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers"
 ]
-packages = [{include = "AWMT_BasicPythonPackage"}]
+
+# Specify the package path explicitly
+packages = [
+    { include = "awmt/proto_dsp_tools" }
+]
 
 [tool.poetry.dependencies]
 python = "^3.9"

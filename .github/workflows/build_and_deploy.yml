@@ -1,6 +1,16 @@
 name: Build & Deploy
 
 on:
+  workflow_dispatch:
+    inputs:
+      deploy_after_build:
+        description: 'Run deploy script after build'
+        required: true
+        default: false
+        type: choice
+        options:
+          - true
+          - false
   pull_request:
     branches:
       - main
@@ -73,11 +83,19 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && github.event.pull_request.head.ref == 'release' }}
+    if: | 
+      (github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'release') ||
+      (github.event.inputs.deploy_after_build &&
+      github.ref == 'refs/heads/main')
+
     steps:
 
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required to get full git log for release notes
       
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -89,6 +107,18 @@ jobs:
         run: |
           pip install twine
 
+      - name: Deploy build to GitHub Releases
+        run: |
+          export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          VERSION="${{ needs.build.outputs.version }}"
+          if gh release view "v$VERSION" > /dev/null 2>&1; then
+            echo "Release v$VERSION already exists. Updating..."
+            gh release upload "v$VERSION" dist/* --clobber
+          else
+            echo "Creating new release v$VERSION..."
+            gh release create "v$VERSION" dist/* --notes "Build artifacts for version $VERSION" --title "v$VERSION"
+          fi
+
       - name: Generate Release Notes
         run: |
           git fetch --tags
@@ -98,25 +128,21 @@ jobs:
           if [ -z "$LAST_TAG" ]; then
             # If no tag is found, use the full commit log
             echo "No version tag found, using full commit log"
-            git log --pretty=format:'- %s' > release_notes.md
+            LOG_OUTPUT=$(git log --pretty=format:'- %s' | tee release_notes.md)
           else
             # If a tag is found, generate release notes from the tag
             echo "Generating release notes from tag $LAST_TAG"
-            git log --pretty=format:'- %s' $LAST_TAG..HEAD > release_notes.md
+            LOG_OUTPUT=$(git log --pretty=format:'- %s' $LAST_TAG..HEAD | tee release_notes.md)
           fi
 
-      - name: Release to GitHub Releases
+          echo "$LOG_OUTPUT"
+
+      - name: Deploy release notes to GitHub Releases
         run: |
           export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
           VERSION="${{ needs.build.outputs.version }}"
-          if gh release view "v$VERSION" > /dev/null 2>&1; then
-            echo "Release v$VERSION already exists. Updating..."
-            gh release upload "v$VERSION" dist/* release_notes.md --clobber
-          else
-            echo "Creating new release v$VERSION..."
-            gh release create "v$VERSION" dist/* --notes "Build artifacts for version $VERSION" --title "v$VERSION"
-            gh release upload "v$VERSION" release_notes.md
-          fi
+          gh release upload "v$VERSION" release_notes.md --clobber
+
 
       - name: Publish to PyPI
         run: |
