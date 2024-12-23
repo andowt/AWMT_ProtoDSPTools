@@ -78,4 +78,16 @@ Full install
 pip install <package_name>
 ```
 
+## Tokens
+
+For the automated pull requests to create releases a token called "PAT_PUSH_TOKEN" is required.
+
+This can be generated under https://github.com/settings/personal-access and should have Read and Write access to code and pull requests as well as Read access to metadata
+
+PAT_PUSH_TOKEN should be added to the repo under secrets.
+
+For uploading to PyPI and API kep is needed
+
+This can be generated through your PyPI settings and should be added to the repo secrets as PYPI_API_TOKEN
+
 
